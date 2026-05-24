@@ -6,6 +6,12 @@ Modern C development is completely divorced from the hardware. When you write `i
 
 **This project exists to kill the middleman.** The `NoSTD` framework is a pure, zero-dependency x86_64 ecosystem built from scratch. It violently strips away the C standard library, bypassing the padded environment of Userland, and connects your logic directly to the Linux Kernel via raw hardware system calls.
 
+## Demo
+
+https://github.com/user-attachments/assets/708bc42c-c523-4521-8a4d-c02ef300db01
+
+*Click the image to watch the NoSTD-Framework in action.*
+
 ---
 
 ## 🏗️ The Problem: Userland vs. Ring 0 & The Glibc Bloat
@@ -29,6 +35,31 @@ This generates thousands of lines of useless assembly instructions, inflating yo
 **NoSTD resolves this by completely hijacking the ELF entry point.** We remove `glibc` entirely. Your code becomes the absolute first instruction the CPU executes when the Kernel hands over the process. No hidden threads, no background initializations, no forced memory allocation.
 
 ---
+
+## Comparison: NoSTD-Framework vs. Glibc (Static)
+
+Below is the comparison between a standard "Hello World" using `glibc` (statically linked to remove dynamic dependencies) and the `NoSTD-Framework`.
+
+<img width="1424" height="483" alt="PoC" src="https://github.com/user-attachments/assets/f1843408-a36b-4f44-854b-e7126cf26df4" />
+
+| Characteristic | Standard (Static Glibc) | NoSTD-Framework |
+| :--- | :--- | :--- |
+| **Binary Size** | ~825 KB | **~9.1 KB** |
+| **Startup Syscalls** | Dozens (`mmap`, `brk`, `arch_prctl`, etc.) | **3 (`execve`, `write`, `exit`)** |
+| **Abstraction** | High (Complex Runtime) | **None (Bare-metal)** |
+
+### 1. Bloat vs. Efficiency
+The massive size of the static `glibc` occurs because the standard library must include complex routines for formatting (`printf`), memory allocation (`malloc`/`free`), signal handling, and localization. `NoSTD` is surgical: it includes only the code necessary for the system calls your software actually uses.
+
+### 2. Execution Trace Analysis (strace)
+When analyzing execution via `strace`, the difference in behavior becomes critical. `glibc` performs a series of "invisible" system calls before executing the first line of your `main`. This generates "noise" that can be detected by EDRs or monitoring tools. `NoSTD` executes your code immediately, with no runtime initialization.
+
+<img width="1427" height="756" alt="strace" src="https://github.com/user-attachments/assets/7abf9879-7bcc-4ea9-a64d-7655e0129f88" />
+
+**Key observations from the trace:**
+* **The Syscall Trinity:** Note the clean execution flow on the right. We initiate with `execve`, perform our task with `write`, and terminate cleanly with `exit`. There are no hidden thread-local storage setup calls or signal handler registrations.
+* **Kernel Direct Access:** Because we bypass the C library, we operate at the hardware level. The Kernel does not know—or care—that a "program" is running; it simply processes the requests passed directly to the CPU registers.
+* **Determinism:** Without the `glibc` runtime, there are no surprises. You have total control over the stack state and registers at the entry point, ensuring the binary's behavior is identical across any compatible Linux environment.
 
 ## 🧬 Architecture Deep-Dive
 
