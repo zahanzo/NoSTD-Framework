@@ -93,3 +93,49 @@ __asm__(
     "    mov $60, %rax\n"     // 6. Carrega SYS_EXIT (60) em RAX
     "    syscall\n"           // 7. Ordena que o Kernel encerre o processo limpidamente
 );
+```
+
+**O Alinhamento da Pilha:** A instrução `and $-16, %rsp` é a chave mestra. Se a pilha não estiver alinhada em 16 bytes antes de chamar uma função C, qualquer CPU moderna executando instruções SIMD/Vetoriais (como `movaps`) fará o programa travar imediatamente.
+
+### 3. O Roteador Universal de Syscalls (Metaprogramação)
+O Kernel Linux x86_64 define mais de 470 chamadas de sistema. Escrever funções wrapper manuais para cada uma delas é inchado e ineficiente. O `NoSTD` resolve isso usando Metaprogramação avançada do Pré-processador C (CPP).
+
+```c
+// Contador de argumentos (Conta até 6 argumentos + 1 ID de Syscall)
+#define __SYSCALL_NARGS(_1, _2, _3, _4, _5, _6, _7, N, ...) N
+#define __SYSCALL_COUNT(...) __SYSCALL_NARGS(__VA_ARGS__, 6, 5, 4, 3, 2, 1, 0)
+
+// Concatenadores de tokens
+#define __SYSCALL_CONCAT(a, b) a ## b
+#define _SYSCALL_CONCAT(a, b) __SYSCALL_CONCAT(a, b)
+
+// O Gateway Universal
+#define syscall(...) _SYSCALL_CONCAT(_sys_call, __SYSCALL_COUNT(__VA_ARGS__))(__VA_ARGS__)
+```
+
+**Como funciona:**
+Quando você escreve `syscall(SYS_WRITE, 1, buffer, length);`, a macro conta dinamicamente os parâmetros em tempo de compilação (4 no total). Em seguida, ela transforma perfeitamente o seu código em `_sys_call3(...)`. 
+
+Isso direciona a execução para um bloco de assembly embutido que alinha estritamente as variáveis nos registradores da System V ABI (`RAX` para o ID da syscall, seguido por `RDI`, `RSI`, `RDX`, `R10`, `R8`, `R9` para os argumentos) antes de executar a instrução de hardware `syscall`. Tudo isso acontece instantaneamente no silício, com zero sobrecarga de tempo de execução e zero alocação de memória.
+
+---
+
+## 🚀 Compilação e Uso
+
+Como este framework rejeita o ecossistema padrão, você deve ordenar estritamente que o compilador recue.
+
+Compile suas ferramentas usando:
+
+```bash
+gcc -O2 -nostdlib -fno-stack-protector -static src/main.c -o my_tool
+```
+
+* `-O2`: Força o compilador a incorporar (*inline*) agressivamente os engines de syscall, achatando o assembly e eliminando a sobrecarga de quadros de pilha de `call`/`ret`.
+* `-nostdlib`: A diretiva principal. Instrui o Linker a ignorar completamente a `glibc` e as rotinas de inicialização padrão (`crt0`).
+* `-fno-stack-protector`: Impede que o compilador injete rotinas `__stack_chk_fail` ao alocar arrays locais na pilha, dando a você controle supremo sobre os limites da sua memória.
+
+## ⚠️ A Realidade do Ring 0
+
+Este framework fornece **zero redes de segurança**. Você está falando diretamente com o Kernel. Se você esquecer de terminar uma string com caractere nulo (`\0`), passar um ponteiro inválido ou requisitar saltos de execução para uma memória marcada como `PROT_NONE`, o Kernel matará instantaneamente o seu processo com uma Falha de Segmentação. 
+
+Bem-vindo ao *bare metal*.
